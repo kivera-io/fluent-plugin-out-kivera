@@ -3,7 +3,7 @@ require 'net/http'
 require 'uri'
 require 'yajl'
 require 'fluent/test/http_output_test'
-require 'fluent/plugin/out_http'
+require 'fluent/plugin/out_kivera'
 require 'fluent/test/driver/output'
 require 'fluent/test/helpers'
 require_relative "./script/plugin/formatter_test"
