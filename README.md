@@ -1,10 +1,9 @@
-# fluent-plugin-out-http, a plugin for [Fluentd](http://fluentd.org)
+# fluent-plugin-out-kivera, a plugin for [Fluentd](http://fluentd.org)
 
 A generic [fluentd][1] output plugin for sending logs to an HTTP endpoint.
+<!-- Replace with GoCD build status
+[![Build Status](https://travis-ci.org/fluent-plugins-nursery/fluent-plugin-out-http.svg?branch=master)](https://travis-ci.org/fluent-plugins-nursery/fluent-plugin-out-http) -->
 
-**NOTE:** This plugin name is overlapped from Fluentd core plugin which name is `out_http`. But core plugin does not provide buffered/non-buffered switch and batch/non-batch request switch. If you want to use these switch features. Please consider to use this plugin.
-
-[![Build Status](https://travis-ci.org/fluent-plugins-nursery/fluent-plugin-out-http.svg?branch=master)](https://travis-ci.org/fluent-plugins-nursery/fluent-plugin-out-http)
 
 ## Installation
 
@@ -37,23 +36,19 @@ $ td-agent-gem install fluent-plugin-out-http
 ## Configuration options
 
     <match *>
-      @type http
+      @type kivera
       endpoint_url    http://localhost.local/api/
+      proxy_credentials_file /path/to/proxy_credentials_file
+      proxy_client_id
+      proxy_client_secret
+      kivera_api      http://api.kivera.io
+      kivera_auth0_domain http://auth.nonp.kivera.io
+      kivera_auth0_cert_file /path/to/auth0_cert_file
       ssl_no_verify   false  # default: false
-      http_method     put    # default: post
-      serializer      json   # default: form
       rate_limit_msec 100    # default: 0 = no rate limiting
       raise_on_error  false  # default: true
       recoverable_status_codes 503, 400 # default: 503
-      cacert_file     /etc/ssl/endpoint1.cert # default: ''
-      client_cert_path /path/to/client_cert.crt # default: ''
-      private_key_path /path/to/private_key.key # default: ''
-      private_key_passphrase yourpassphrase # default: ''
       custom_headers  {"token":"arbitrary"} # default: nil
-      authentication  basic  # default: none
-      username        alice  # default: ''
-      password        bobpop # default: '', secret: true
-      token           tokent # default: ''
       buffered        true   # default: false. Switch non-buffered/buffered mode
       bulk_request    false  # default: false. Send events as application/x-ndjson
       compress_request true  # default: false. Send compressed events

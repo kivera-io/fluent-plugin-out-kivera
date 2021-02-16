@@ -5,16 +5,19 @@ require 'fluent/plugin/output'
 require 'tempfile'
 require 'openssl'
 require 'zlib'
+require 'jwt'
 
 class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
-  Fluent::Plugin.register_output('http', self)
+  Fluent::Plugin.register_output('kivera', self)
 
   class RecoverableResponse < StandardError; end
 
-  helpers :compat_parameters, :formatter
+  helpers :compat_parameters, :formatter, :storage
 
+  DEFAULT_STORAGE_TYPE = "local"
   DEFAULT_BUFFER_TYPE = "memory"
   DEFAULT_FORMATTER = "json"
+  TOKEN_EXPIRY_OFFSET = 300
 
   def initialize
     super
@@ -26,12 +29,6 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
   # Set Net::HTTP.verify_mode to `OpenSSL::SSL::VERIFY_NONE`
   config_param :ssl_no_verify, :bool, :default => false
 
-  # HTTP method
-  config_param :http_method, :enum, list: [:get, :put, :post, :delete], :default => :post
-
-  # form | json | text | raw
-  config_param :serializer, :enum, list: [:json, :form, :text, :raw], :default => :form
-
   # Simple rate limiting: ignore any records within `rate_limit_msec`
   # since the last one.
   config_param :rate_limit_msec, :integer, :default => 0
@@ -42,29 +39,30 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
   # Specify recoverable error codes
   config_param :recoverable_status_codes, :array, value_type: :integer, default: [503]
 
-  # ca file to use for https request
-  config_param :cacert_file, :string, :default => ''
+  # kivera proxy client credentials file
+  config_param :proxy_credentials_file, :string, default: ""
 
-  # specify client sertificate
-  config_param :client_cert_path, :string, :default => ''
+  # kivera proxy client id
+  config_param :proxy_client_id, :string, default: ""
 
-  # specify private key path
-  config_param :private_key_path, :string, :default => ''
+  # kivera proxy client secret
+  config_param :proxy_client_secret, :string, default: ""
 
-  # specify private key passphrase
-  config_param :private_key_passphrase, :string, :default => '', :secret => true
+  # kivera api
+  config_param :kivera_api, :string
+
+  # Kivera auth0 domain
+  config_param :kivera_auth0_domain, :string
+
+  # auth0 certificate file
+  config_param :kivera_auth0_cert_file, :string
 
   # custom headers
   config_param :custom_headers, :hash, :default => nil
 
-  # 'none' | 'basic' | 'jwt' | 'bearer'
-  config_param :authentication, :enum, list: [:none, :basic, :jwt, :bearer],  :default => :none
-  config_param :username, :string, :default => ''
-  config_param :password, :string, :default => '', :secret => true
-  config_param :token, :string, :default => ''
   # Switch non-buffered/buffered plugin
+  config_param :bulk_request, :bool, :default => true
   config_param :buffered, :bool, :default => false
-  config_param :bulk_request, :bool, :default => false
   # Compress with gzip except for form serializer
   config_param :compress_request, :bool, :default => false
 
@@ -87,7 +85,6 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
                          OpenSSL::SSL::VERIFY_PEER
                        end
 
-    @ca_file = @cacert_file
     @last_request_time = nil
     raise Fluent::ConfigError, "'tag' in chunk_keys is required." if !@chunk_key_tag && @buffered
 
@@ -105,7 +102,22 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
       class << self
         alias_method :format, :split_request_format
       end
+      @serializer = :json
     end
+
+    # Create local storage for persisting JWT token
+    config = conf.elements(name: 'storage').first
+    @storage = storage_create(usage: 'jwt_token', conf: config, default_type: 'local')
+
+    if ! @kivera_proxy_credentials_file.empty?
+      creds =  File.read(@kivera_proxy_credentials_file)
+      parsed = Yajl::Parser.new.parse(StringIO.new(creds))
+      @kivera_proxy_client_id = parsed["client_id"]
+      @kivera_proxy_client_secret = parsed["client_secret"]
+    elsif @kivera_proxy_client_id.empty? && @kivera_proxy_client_id.empty?
+      log.error "Either kivera_proxy_credentials_file or both kivera_proxy_client_id and kivera_proxy_client_id need to be set"
+    end
+
   end
 
   def start
@@ -123,10 +135,6 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
   def set_body(req, tag, time, record)
     if @serializer == :json
       set_json_body(req, record)
-    elsif @serializer == :text
-      set_text_body(req, record)
-    elsif @serializer == :raw
-      set_raw_body(req, record)
     elsif @serializer == :x_ndjson
       set_bulk_body(req, record)
     else
@@ -146,6 +154,59 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
     end
   end
 
+  def refresh_jwt_token
+    if @storage.get(:jwt_token)
+      if token_expired(token)
+        @storage.put(:jwt_token, new_jwt_token())
+      end
+    else
+      @storage.put(:jwt_token, new_jwt_token()) 
+    end
+  end
+
+  def token_expired(token)
+    auth0_cert =  File.read(@auth0_cert_file)
+    x509 = OpenSSL::X509::Certificate.new(auth0_cert)
+    begin
+      decoded_token = JWT.decode token, x509.public_key, true, { algorithm: 'RS256' }
+    rescue => e
+        return true
+    else
+      if decoded_token[0]['exp'] - Time.now.to_f < TOKEN_EXPIRY_OFFSET
+        return true
+      end
+      return false
+    end
+  end
+
+  def new_jwt_token()
+    url = "https://" + @kivera_auth0_domain + "/oauth/token"
+    uri = URI.parse(url)
+    req = Net::HTTP::Post.new(uri.to_s)
+    payload = { 
+      "client_id" =>      @kivera_proxy_client_id,
+			"client_secret" =>  @kivera_proxy_client_secret,
+			"audience" =>       @kivera_api,
+      "grant_type" =>     "client_credentials"
+    }
+    set_json_body(req, payload)
+    res = https(uri).request(req)
+    case res
+    when Net::HTTPSuccess then
+      parsed = Yajl::Parser.new.parse(StringIO.new(res.body))
+      parsed['access_token']
+    else
+      log.warn "Failed to get token for client #{client_id}"
+    end
+  end
+
+  def https(uri)
+    Net::HTTP.new(uri.host, uri.port).tap { |http|
+      http.use_ssl = true
+      http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    }
+  end
+
   def compress_body(req, data)
     return unless @compress_request
     gz = Zlib::GzipWriter.new(StringIO.new)
@@ -161,42 +222,33 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
     compress_body(req, req.body)
   end
 
-  def set_text_body(req, data)
-    req.body = data["message"]
-    req['Content-Type'] = 'text/plain'
-    compress_body(req, req.body)
-  end
-
-  def set_raw_body(req, data)
-    req.body = data.to_s
-    req['Content-Type'] = 'application/octet-stream'
-    compress_body(req, req.body)
-  end
-
   def set_bulk_body(req, data)
     req.body = data.to_s
     req['Content-Type'] = 'application/x-ndjson'
     compress_body(req, req.body)
   end
 
+  def set_jwt_auth(req)
+    req['authorization'] = "jwt #{@storage.get(:jwt_token)}"
+  end
+
   def create_request(tag, time, record)
     url = format_url(tag, time, record)
     uri = URI.parse(url)
-    req = Net::HTTP.const_get(@http_method.to_s.capitalize).new(uri.request_uri)
+    req = Net::HTTP::Put.new(uri.request_uri)
     set_body(req, tag, time, record)
     set_header(req, tag, time, record)
+    refresh_jwt_token
+    set_jwt_auth(req)
     return req, uri
   end
 
   def http_opts(uri)
-      opts = {
-        :use_ssl => uri.scheme == 'https'
-      }
-      opts[:verify_mode] = @ssl_verify_mode if opts[:use_ssl]
-      opts[:ca_file] = File.join(@ca_file) if File.file?(@ca_file)
-      opts[:cert] = OpenSSL::X509::Certificate.new(File.read(@client_cert_path)) if File.file?(@client_cert_path)
-      opts[:key] = OpenSSL::PKey.read(File.read(@private_key_path), @private_key_passphrase) if File.file?(@private_key_path)
-      opts
+    opts = {
+      :use_ssl => uri.scheme == 'https'
+    }
+    opts[:verify_mode] = @ssl_verify_mode if opts[:use_ssl]
+    opts
   end
 
   def proxies
@@ -213,14 +265,6 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
     res = nil
 
     begin
-      if @authentication == :basic
-        req.basic_auth(@username, @password)
-      elsif @authentication == :bearer
-        req['authorization'] = "bearer #{@token}"
-      elsif @authentication == :jwt
-        req['authorization'] = "jwt #{@token}"
-      end
-      @last_request_time = Time.now.to_f
 
       if proxy = proxies
         proxy_uri = URI.parse(proxy)
