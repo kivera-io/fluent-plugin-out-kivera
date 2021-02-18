@@ -6,20 +6,22 @@ A generic [fluentd][1] output plugin for sending Kivera proxy logs to the Kivera
 
 You can specify the path to a config.json file which can contain the following parameters:
 
-  *config.json*
-  {
-    "client_id": "",
-    "client_secret": "",
-    "audience": "",
-    "auth0_domain": "",
-    "auth0_cert": "",
-    "auth0_cert_file": ""
-  }
+*config.json*
+
+    {
+      "client_id": "",
+      "client_secret": "",
+      "audience": "",
+      "auth0_domain": "",
+      "auth0_cert": "",
+      "auth0_cert_file": ""
+    }
 
 Note that parameter specified within the config_file will take precendence over parameters specified in your fluent.conf.
 Also note that the auth0_cert parameter will take precedence over the auth0_cert_file parameter.
 
-  *fluent.conf*
+*fluent.conf*
+
     <match *>
       @type kivera
       endpoint_url              http://localhost.local/api/
