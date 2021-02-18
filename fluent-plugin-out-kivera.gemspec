@@ -2,10 +2,10 @@
 
 Gem::Specification.new do |gem|
   gem.name          = "fluent-plugin-out-kivera"
-  gem.version       = "1.3.3"
-  gem.authors       = ["Tyler Matheson", "Marica Odagaki"]
+  gem.version       = "1.0.0"
+  gem.authors       = ["Tyler Matheson"]
   gem.email         = ["tyler@kivera.io"]
-  gem.summary       = %q{A Fluentd output plugin to send Kivera proxy logs to Kivera log ingestion service}
+  gem.summary       = %q{A Fluentd output plugin for sending Kivera proxy logs to the Kivera log ingestion service}
   gem.description   = gem.summary
   gem.homepage      = "https://github.com/kivera-io/fluent-plugin-out-kivera"
   gem.licenses      = ["Apache-2.0"]
@@ -19,7 +19,7 @@ Gem::Specification.new do |gem|
 
   gem.add_runtime_dependency "yajl-ruby", "~> 1.0"
   gem.add_runtime_dependency "fluentd", [">= 0.14.22", "< 2"]
-  gem.add_development_dependency "jwt"
+  gem.add_runtime_dependency "jwt", '~> 2.2'
   gem.add_development_dependency "bundler"
   gem.add_development_dependency "rake"
   gem.add_development_dependency "test-unit", ">= 3.1.0"
