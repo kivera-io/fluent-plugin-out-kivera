@@ -39,23 +39,26 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
   # Specify recoverable error codes
   config_param :recoverable_status_codes, :array, value_type: :integer, default: [503]
 
-  # kivera proxy client credentials file
-  config_param :proxy_credentials_file, :string, default: ""
+  # kivera proxy client config file
+  config_param :config_file, :string, default: ""
 
   # kivera proxy client id
-  config_param :proxy_client_id, :string, default: ""
+  config_param :client_id, :string, default: ""
 
   # kivera proxy client secret
-  config_param :proxy_client_secret, :string, default: ""
+  config_param :client_secret, :string, default: ""
 
-  # kivera api
-  config_param :kivera_api, :string
+  # kivera audience api
+  config_param :audience, :string, default: ""
+
+  # explicit Kivera auth0 certificate as a string
+  config_param :auth0_cert, :string, default: ""
+
+  # Kivera auth0 certificate file
+  config_param :auth0_cert_file, :string, default: ""
 
   # Kivera auth0 domain
-  config_param :kivera_auth0_domain, :string
-
-  # auth0 certificate file
-  config_param :kivera_auth0_cert_file, :string
+  config_param :auth0_domain, :string, default: ""
 
   # custom headers
   config_param :custom_headers, :hash, :default => nil
@@ -109,13 +112,28 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
     config = conf.elements(name: 'storage').first
     @storage = storage_create(usage: 'jwt_token', conf: config, default_type: 'local')
 
-    if ! @kivera_proxy_credentials_file.empty?
-      creds =  File.read(@kivera_proxy_credentials_file)
+    if ! @config_file.empty?
+      creds =  File.read(@config_file)
       parsed = Yajl::Parser.new.parse(StringIO.new(creds))
-      @kivera_proxy_client_id = parsed["client_id"]
-      @kivera_proxy_client_secret = parsed["client_secret"]
-    elsif @kivera_proxy_client_id.empty? && @kivera_proxy_client_id.empty?
-      log.error "Either kivera_proxy_credentials_file or both kivera_proxy_client_id and kivera_proxy_client_id need to be set"
+      @client_id = parsed.fetch("client_id", @client_id)
+      @client_secret = parsed.fetch("client_secret", @client_secret)
+      @audience = parsed.fetch("audience", @audience)
+      @auth0_cert = parsed.fetch("auth0_cert", @auth0_cert)
+      @auth0_cert_file = parsed.fetch("auth0_cert", @auth0_cert_file)
+      @auth0_domain = parsed.fetch("auth0_domain", @auth0_domain)
+    end
+
+    if @auth0_cert.empty? && ! @auth0_cert_file.empty?
+      @auth0_cert = File.read(@auth0_cert_file)
+    end
+
+    if @client_id.empty? && 
+        @client_secret.empty? && 
+        @audience.empty? && 
+        @auth0_cert.empty? && 
+        @auth0_domain.empty?
+      params = "client_id, client_secret, audience, auth0_cert and auth0_domain"
+      log.error "Missing configuration. Either specify a config_file or set the #{params} parameters"
     end
 
   end
@@ -156,37 +174,38 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
 
   def refresh_jwt_token
     if @storage.get(:jwt_token)
-      if token_expired(token)
-        @storage.put(:jwt_token, new_jwt_token())
+      if token_expired
+        @storage.put(:jwt_token, new_jwt_token)
       end
     else
-      @storage.put(:jwt_token, new_jwt_token()) 
+      @storage.put(:jwt_token, new_jwt_token)
     end
   end
 
-  def token_expired(token)
-    auth0_cert =  File.read(@auth0_cert_file)
-    x509 = OpenSSL::X509::Certificate.new(auth0_cert)
+  def token_expired
+    x509 = OpenSSL::X509::Certificate.new(@auth0_cert)
     begin
-      decoded_token = JWT.decode token, x509.public_key, true, { algorithm: 'RS256' }
+      decoded_token = JWT.decode @storage.get(:jwt_token), x509.public_key, true, { algorithm: 'RS256' }
     rescue => e
+        log.info 'JWT token expired'
         return true
     else
       if decoded_token[0]['exp'] - Time.now.to_f < TOKEN_EXPIRY_OFFSET
+        log.info 'JWT token about to expire'
         return true
       end
       return false
     end
   end
 
-  def new_jwt_token()
-    url = "https://" + @kivera_auth0_domain + "/oauth/token"
+  def new_jwt_token
+    url = "https://" + @auth0_domain + "/oauth/token"
     uri = URI.parse(url)
     req = Net::HTTP::Post.new(uri.to_s)
     payload = { 
-      "client_id" =>      @kivera_proxy_client_id,
-			"client_secret" =>  @kivera_proxy_client_secret,
-			"audience" =>       @kivera_api,
+      "client_id" =>      @client_id,
+			"client_secret" =>  @client_secret,
+			"audience" =>       @audience,
       "grant_type" =>     "client_credentials"
     }
     set_json_body(req, payload)
@@ -194,9 +213,10 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
     case res
     when Net::HTTPSuccess then
       parsed = Yajl::Parser.new.parse(StringIO.new(res.body))
+      log.info 'Generated new JWT token'
       parsed['access_token']
     else
-      log.warn "Failed to get token for client #{client_id}"
+      log.warn "Failed to get token for client #{@client_id}"
     end
   end
 
@@ -229,7 +249,8 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
   end
 
   def set_jwt_auth(req)
-    req['authorization'] = "jwt #{@storage.get(:jwt_token)}"
+    refresh_jwt_token
+    req['Authorization'] = "Bearer #{@storage.get(:jwt_token)}"
   end
 
   def create_request(tag, time, record)
@@ -238,7 +259,6 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
     req = Net::HTTP::Put.new(uri.request_uri)
     set_body(req, tag, time, record)
     set_header(req, tag, time, record)
-    refresh_jwt_token
     set_jwt_auth(req)
     return req, uri
   end
