@@ -24,7 +24,7 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
   end
 
   # Endpoint URL ex. http://localhost.local/api/
-  config_param :endpoint_url, :string
+  config_param :endpoint_url, :string, default: ""
 
   # Set Net::HTTP.verify_mode to `OpenSSL::SSL::VERIFY_NONE`
   config_param :ssl_no_verify, :bool, :default => false
@@ -134,6 +134,11 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
         @auth0_domain.empty?
       params = "client_id, client_secret, audience, auth0_cert and auth0_domain"
       log.error "Missing configuration. Either specify a config_file or set the #{params} parameters"
+    end
+
+    if @endpoint_url.empty?
+      @endpoint_url = "https://logs.#{@auth0_domain.delete_prefix("auth.")}"
+      log.info "Using logs endpoint #{@endpoint_url}"
     end
 
   end
@@ -285,6 +290,8 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
     res = nil
 
     begin
+
+      log.debug "Sending #{req.body.bytesize}B to #{uri}"
 
       if proxy = proxies
         proxy_uri = URI.parse(proxy)
