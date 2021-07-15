@@ -2,11 +2,11 @@
 
 Gem::Specification.new do |gem|
   gem.name          = "fluent-plugin-out-kivera"
-  gem.version       = "1.0.0"
+  gem.version       = "1.0.2"
   gem.authors       = ["Tyler Matheson"]
   gem.email         = ["tyler@kivera.io"]
-  gem.summary       = %q{A Fluentd output plugin for sending Kivera proxy logs to the Kivera log ingestion service}
-  gem.description   = gem.summary
+  gem.summary       = "Fluentd plugin for Kivera"
+  gem.description   = "A Fluentd output plugin for sending Kivera proxy logs to the Kivera log ingestion service"
   gem.homepage      = "https://github.com/kivera-io/fluent-plugin-out-kivera"
   gem.licenses      = ["Apache-2.0"]
 
