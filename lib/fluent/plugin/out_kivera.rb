@@ -133,11 +133,11 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
         @auth0_cert.empty? && 
         @auth0_domain.empty?
       params = "client_id, client_secret, audience, auth0_cert and auth0_domain"
-      log.error "Missing configuration. Either specify a config_file or set the #{params} parameters"
+      raise Fluent::ConfigError, "Missing configuration. Either specify a config_file or set the #{params} parameters"
     end
 
     if @endpoint_url.empty?
-      @endpoint_url = "https://logs.#{@auth0_domain.delete_prefix("auth.")}"
+      @endpoint_url = "https://#{@auth0_domain.sub("auth", "logs")}"
       log.info "Using logs endpoint #{@endpoint_url}"
     end
 
