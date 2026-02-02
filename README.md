@@ -2,34 +2,6 @@
 
 A generic [fluentd][1] output plugin for sending Kivera proxy logs to the Kivera log ingestion service.
 
-## Installation
-
-### For bundler
-
-Write the following line in Gemfile:
-
-```gemfile
-gem "fluent-plugin-out-http"
-```
-
-and then,
-
-```console
-$ bundle install
-```
-
-### for fluentd
-
-```console
-$ fluent-gem install fluent-plugin-out-http
-```
-
-### For td-agent
-
-```console
-$ td-agent-gem install fluent-plugin-out-http
-```
-
 ## Configuration options
 
 You can specify the path to a config.json file which can contain the following parameters:
