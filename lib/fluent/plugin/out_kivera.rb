@@ -48,6 +48,9 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
   # kivera proxy client secret
   config_param :client_secret, :string, default: ""
 
+  # Kivera proxy entity secret
+  config_param :entity_secret, :string, default: ""
+
   # kivera audience api
   config_param :audience, :string, default: ""
 
@@ -112,11 +115,12 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
     config = conf.elements(name: 'storage').first
     @storage = storage_create(usage: 'jwt_token', conf: config, default_type: 'local')
 
-    if ! @config_file.empty?
+    unless @config_file.empty?
       creds =  File.read(@config_file)
       parsed = Yajl::Parser.new.parse(StringIO.new(creds))
       @client_id = parsed.fetch("client_id", @client_id)
       @client_secret = parsed.fetch("client_secret", @client_secret)
+      @entity_secret = parsed.fetch("entity_secret", @entity_secret)
       @audience = parsed.fetch("audience", @audience)
       @auth0_cert = parsed.fetch("auth0_cert", @auth0_cert)
       @auth0_cert_file = parsed.fetch("auth0_cert", @auth0_cert_file)
@@ -127,10 +131,10 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
       @auth0_cert = File.read(@auth0_cert_file)
     end
 
-    if @client_id.empty? && 
-        @client_secret.empty? && 
-        @audience.empty? && 
-        @auth0_cert.empty? && 
+    if @client_id.empty? &&
+        @client_secret.empty? &&
+        @audience.empty? &&
+        @auth0_cert.empty? &&
         @auth0_domain.empty?
       params = "client_id, client_secret, audience, auth0_cert and auth0_domain"
       raise Fluent::ConfigError, "Missing configuration. Either specify a config_file or set the #{params} parameters"
@@ -207,12 +211,13 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
     url = "https://" + @auth0_domain + "/oauth/token"
     uri = URI.parse(url)
     req = Net::HTTP::Post.new(uri.to_s)
-    payload = { 
+    payload = {
       "client_id" =>      @client_id,
 			"client_secret" =>  @client_secret,
 			"audience" =>       @audience,
       "grant_type" =>     "client_credentials"
     }
+    payload["entity_secret"] = @entity_secret if @entity_secret
     set_json_body(req, payload)
     res = https(uri).request(req)
     case res
@@ -281,8 +286,8 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
   end
 
   def send_request(req, uri)
-    is_rate_limited = (@rate_limit_msec != 0 and not @last_request_time.nil?)
-    if is_rate_limited and ((Time.now.to_f - @last_request_time) * 1000.0 < @rate_limit_msec)
+    is_rate_limited = (@rate_limit_msec != 0 && ! @last_request_time.nil?)
+    if is_rate_limited && ((Time.now.to_f - @last_request_time) * 1000.0 < @rate_limit_msec)
       log.info('Dropped request due to rate limiting')
       return
     end
@@ -308,7 +313,7 @@ class Fluent::Plugin::HTTPOutput < Fluent::Plugin::Output
       log.warn "Net::HTTP.#{req.method.capitalize} raises exception: #{e.class}, '#{e.message}'"
       raise e if @raise_on_error
     else
-       unless res and res.is_a?(Net::HTTPSuccess)
+       unless res && res.is_a?(Net::HTTPSuccess)
           res_summary = if res
                            "#{res.code} #{res.message} #{res.body}"
                         else
