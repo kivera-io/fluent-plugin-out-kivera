@@ -4,7 +4,7 @@ SHELL=/bin/bash
 
 build:
 	@if [ "${VER}" = "" ]; then echo "VER not set"; exit 1; else echo "VER=${VER}"; fi
-	sed -i 's/  gem.version.*/  gem.version       = "${VER}"/g' fluent-plugin-out-kivera.gemspec
+	sed -i '' 's/  gem.version.*/  gem.version       = "${VER}"/g' fluent-plugin-out-kivera.gemspec
 	gem build fluent-plugin-out-kivera
 
 push:

@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |gem|
   gem.name          = "fluent-plugin-out-kivera"
-  gem.version       = "1.0.3"
+  gem.version       = "1.0.4"
   gem.authors       = ["Tyler Matheson"]
   gem.email         = ["tyler@kivera.io"]
   gem.summary       = "Fluentd plugin for Kivera"
